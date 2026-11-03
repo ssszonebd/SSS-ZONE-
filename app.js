@@ -1,0 +1,50 @@
+const $=s=>document.querySelector(s),app=$('#app');
+const h=s=>String(s??'').replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';'),tk=n=>'৳'+Number(n).toLocaleString('en-US');
+const api=async(u,o={})=>{const r=await fetch('/api'+u,{method:o.method||'GET',headers:o.body?{'Content-Type':'application/json'}:{},body:o.body?JSON.stringify(o.body):undefined});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Something went wrong');return d};
+let me=null,cart={};try{cart=JSON.parse(localStorage.cart||'{}')}catch{}
+const save=()=>{try{localStorage.cart=JSON.stringify(cart)}catch{}$('#cc').textContent=Object.values(cart).reduce((a,b)=>a+b,0)};
+const nav=()=>{$('#acc').textContent=me?me.name.split(' ')[0]:'Login';$('#acc').setAttribute('href',me?'/account':'/login')};
+const toast=(m,bad)=>{const t=$('#toast');t.textContent=m;t.className=bad?'show bad':'show';clearTimeout(t._t);t._t=setTimeout(()=>t.className='',3500)};
+const go=u=>{history.pushState(0,'',u);route()},loading=()=>app.innerHTML='<p class="muted">Loading…</p>';
+const img=p=>p.image?`<img loading="lazy" src="${h(p.image)}" alt="${h(p.name)}">`:'<div class="ph">No image</div>';
+const priceH=p=>`${tk(p.eff)}${p.sale_price?` <s>${tk(p.price)}</s>`:''}`;
+const card=p=>`<article class="card"><a data-l href="/p/${h(p.slug)}">${img(p)}<h3>${h(p.name)}</h3></a><p class="price">${priceH(p)}</p>${p.stock>0?`<button data-add="${p.id}">Add to cart</button>`:'<span class="muted">Out of stock</span>'}<button class="ghost" data-wish="${p.id}" aria-label="Add to wishlist">♡</button></article>`;
+document.addEventListener('click',async e=>{const t=e.target,a=t.closest('a[data-l]');
+ if(a){e.preventDefault();return go(a.getAttribute('href'))}
+ if(t.dataset.add){cart[t.dataset.add]=Math.min((cart[t.dataset.add]||0)+1,20);save();toast('Added to cart')}
+ if(t.dataset.wish)try{await api('/wishlist/'+t.dataset.wish,{method:'POST'});toast('Saved to wishlist')}catch(x){toast(x.message==='Please log in'?'Log in to use your wishlist':x.message,1)}
+ if(t.dataset.q){const[id,d]=t.dataset.q.split(':');cart[id]=Math.min(20,(cart[id]||0)+ +d);if(cart[id]<1)delete cart[id];save();route()}
+ if(t.dataset.rm){delete cart[t.dataset.rm];save();route()}});
+onpopstate=()=>route();
+$('#sf').onsubmit=e=>{e.preventDefault();go('/?q='+encodeURIComponent($('#q').value))};
+async function home(){loading();const sp=new URLSearchParams(location.search),[cats,ps]=await Promise.all([api('/categories'),api('/products?'+sp)]);
+ app.innerHTML=`${sp.toString()?'':'<section class="hero"><h1>Style for Everyone</h1><p>Men’s · Women’s · Kids’ Fashion | Cash on Delivery across Bangladesh</p><a class="btn" href="#items">Explore Collection</a></section>'}
+ <div class="cats">${cats.map(c=>`<a data-l href="/?category=${h(c.slug)}" class="chip${sp.get('category')===c.slug?' on':''}">${h(c.name)}</a>`).join('')}</div>
+ <form id="flt" class="flt"><input name="q" placeholder="Search" value="${h(sp.get('q')||'')}"><input name="min" type="number" min="0" placeholder="Min ৳" value="${h(sp.get('min')||'')}"><input name="max" type="number" min="0" placeholder="Max ৳" value="${h(sp.get('max')||'')}"><select name="sort" aria-label="Sort">${[['new','Newest'],['low','Price: low to high'],['high','Price: high to low'],['name','Name']].map(([v,l])=>`<option value="${v}"${sp.get('sort')===v?' selected':''}>${l}</option>`).join('')}</select><button>Apply</button></form>
+ <section id="items" class="grid">${ps.map(card).join('')||'<p>No products found.</p>'}</section>`;
+ $('#flt').onsubmit=e=>{e.preventDefault();const n=new URLSearchParams(new FormData(e.target));if(sp.get('category'))n.set('category',sp.get('category'));for(const[k,v]of[...n])if(!v)n.delete(k);go('/?'+n)}}
+async function product(slug){loading();const p=await api('/products/'+encodeURIComponent(slug));document.title=p.name+' | SSS ZONE';
+ app.innerHTML=`<div class="pd">${img(p)}<div><h1>${h(p.name)}</h1><p class="muted">${h(p.cat||'')}</p><p class="price big">${priceH(p)}</p><p>${p.stock>0?'In stock ('+p.stock+')':'Out of stock'}</p><p>${h(p.description)}</p>${p.stock>0?`<button data-add="${p.id}">Add to cart</button> `:''}<button class="ghost" data-wish="${p.id}">♡ Wishlist</button></div></div>`}
+async function cartPage(){const ids=Object.keys(cart);if(!ids.length){app.innerHTML='<h1>Your cart</h1><p>Your cart is empty. <a data-l href="/">Continue shopping</a></p>';return}
+ loading();const ps=await api('/products?ids='+ids);ids.forEach(i=>{if(!ps.find(p=>p.id==i))delete cart[i]});save();let sub=0;
+ app.innerHTML=`<h1>Your cart</h1>${ps.map(p=>{const q=cart[p.id];sub+=p.eff*q;return`<div class="row">${img(p)}<div><b>${h(p.name)}</b><br>${tk(p.eff)}</div><div class="qty"><button data-q="${p.id}:-1" aria-label="Decrease">−</button>${q}<button data-q="${p.id}:1" aria-label="Increase">+</button></div><button class="ghost" data-rm="${p.id}">Remove</button></div>`}).join('')}<p class="total">Subtotal: ${tk(sub)}</p><p class="muted">Delivery and coupons are calculated at checkout.</p><a class="btn" data-l href="/checkout">Checkout</a>`}
+async function checkout(){if(!me)return go('/login?next=/checkout');if(!Object.keys(cart).length)return go('/cart');
+ app.innerHTML=`<form id="co" class="form"><h1>Checkout</h1><input name="name" placeholder="Full name" value="${h(me.name)}" required autocomplete="name"><input name="phone" type="tel" placeholder="Mobile (01XXXXXXXXX)" value="${h(me.phone)}" required pattern="(\\+?88)?01[3-9][0-9]{8}"><input name="division" placeholder="Division (e.g. Dhaka)" required><input name="district" placeholder="District (e.g. Dhaka)" required><input name="upazila" placeholder="Upazila / Thana" required><input name="line" placeholder="House, road, area" required><input name="postcode" placeholder="Postcode (optional)" maxlength="4"><input name="coupon" placeholder="Coupon code (optional)">
+ <h2>Payment</h2><label><input type="radio" name="payment" value="cod" checked> Cash on Delivery</label><label class="muted"><input type="radio" disabled> bKash — not configured</label><label class="muted"><input type="radio" disabled> Nagad — not configured</label><label class="muted"><input type="radio" disabled> Card / SSLCommerz — not configured</label>
+ <p class="muted">Delivery: ৳60 inside Dhaka, ৳120 elsewhere. The server calculates your final total.</p><button>Place order</button></form>`;
+ $('#co').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target)),b=e.target.querySelector('button:last-child');b.disabled=true;b.textContent='Placing order…';
+  try{const r=await api('/orders',{method:'POST',body:{items:Object.entries(cart).map(([id,qty])=>({id:+id,qty})),payment:f.payment,coupon:f.coupon,address:{name:f.name,phone:f.phone,division:f.division,district:f.district,upazila:f.upazila,line:f.line,postcode:f.postcode}}});
+   cart={};save();app.innerHTML=`<h1>Order placed ✔</h1><p>Order code: <b>${h(r.code)}</b>. Pay ${tk(r.total)} in cash on delivery.</p><a class="btn" data-l href="/account">View my orders</a>`}
+  catch(x){toast(x.message,1);b.disabled=false;b.textContent='Place order'}}}
+function login(){const nx=new URLSearchParams(location.search).get('next')||'/account';
+ app.innerHTML=`<div class="form"><h1>Login</h1><form id="lf"><input name="email" type="email" placeholder="Email" required autocomplete="email"><input name="password" type="password" placeholder="Password" required autocomplete="current-password"><button>Login</button></form><h2>New customer?</h2><form id="rf"><input name="name" placeholder="Full name" required><input name="email" type="email" placeholder="Email" required><input name="phone" type="tel" placeholder="Mobile 01XXXXXXXXX" required><input name="password" type="password" minlength="8" placeholder="Password (8+ characters)" required autocomplete="new-password"><button>Create account</button></form></div>`;
+ for(const[id,u]of[['lf','/login'],['rf','/register']])$('#'+id).onsubmit=async e=>{e.preventDefault();try{me=await api(u,{method:'POST',body:Object.fromEntries(new FormData(e.target))});nav();go(nx.startsWith('/')&&!nx.startsWith('//')?nx:'/account')}catch(x){toast(x.message,1)}}}
+async function account(){if(!me)return go('/login?next=/account');loading();const[os,ws]=await Promise.all([api('/orders'),api('/wishlist')]);
+ app.innerHTML=`<h1>Hello, ${h(me.name)}</h1><button id="lo" class="ghost">Log out</button><h2>Order history</h2>${os.map(o=>`<div class="row"><div><b>${h(o.code)}</b><br><span class="muted">${h(o.created)}</span><br>${o.items.map(i=>h(i.name)+' ×'+i.qty).join(', ')}</div><div>${tk(o.total)}<br><span class="chip on">${h(o.status)}</span></div></div>`).join('')||'<p>No orders yet.</p>'}<h2>Wishlist</h2><section class="grid">${ws.map(card).join('')||'<p>Your wishlist is empty.</p>'}</section>`;
+ $('#lo').onclick=async()=>{await api('/logout',{method:'POST'});me=null;nav();go('/')}}
+function track(){app.innerHTML=`<div class="form"><h1>Track your order</h1><form id="tf"><input name="code" placeholder="Order code" required><input name="phone" placeholder="Phone used on the order" required><button>Track</button></form><div id="tr"></div></div>`;
+ $('#tf').onsubmit=async e=>{e.preventDefault();try{const o=await api('/track?'+new URLSearchParams(new FormData(e.target)));$('#tr').innerHTML=`<p><b>${h(o.code)}</b> — <span class="chip on">${h(o.status)}</span><br>Payment: ${h(o.payment)} (${h(o.payment_status)})<br>Total: ${tk(o.total)}</p>`}catch(x){toast(x.message,1)}}}
+async function route(){const p=location.pathname;scrollTo(0,0);document.title='SSS ZONE – Fashion for Everyone';
+ try{if(p==='/')await home();else if(p.startsWith('/p/'))await product(p.slice(3));else if(p==='/cart')await cartPage();else if(p==='/checkout')await checkout();else if(p==='/login')login();else if(p==='/account')await account();else if(p==='/track')track();else app.innerHTML='<h1>Page not found</h1>'}
+ catch(e){app.innerHTML=`<p class="err">${h(e.message)} <button id="rt">Retry</button></p>`;$('#rt').onclick=route}}
+(async()=>{try{me=await api('/me')}catch{}nav();save();route()})();
